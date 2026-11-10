@@ -18,6 +18,8 @@ CENTERING = {
     "I": [(0, 0, 0), (0.5, 0.5, 0.5)],
     "F": [(0, 0, 0), (0.5, 0.5, 0), (0.5, 0, 0.5), (0, 0.5, 0.5)],
     "R": [(0, 0, 0)],          # komórka romboedryczna jest prymitywna
+    # sieć R w ustawieniu heksagonalnym (obverse): 3 węzły na komórkę
+    "R_hex": [(0, 0, 0), (2 / 3, 1 / 3, 1 / 3), (1 / 3, 2 / 3, 2 / 3)],
 }
 
 CENTERING_NAME = {
@@ -26,6 +28,7 @@ CENTERING_NAME = {
     "I": "przestrzennie centrowana (I)",
     "F": "ściennie centrowana (F)",
     "R": "romboedryczna (prymitywna)",
+    "R_hex": "romboedryczna, ustawienie heksagonalne (obverse)",
 }
 
 
@@ -155,3 +158,25 @@ def unit_cell_segments():
 
 def nodes_per_cell(centering: str) -> int:
     return len(CENTERING[centering])
+
+
+# ----------------------------------------------------------------------
+# sieć R: ustawienie romboedryczne <-> heksagonalne (obverse)
+#   a_H = a_R - b_R,  b_H = b_R - c_R,  c_H = a_R + b_R + c_R
+
+def rhombo_to_hex(a, alpha):
+    """(a_R, α) -> (a_H, c_H)."""
+    al = np.radians(alpha)
+    return 2.0 * a * np.sin(al / 2.0), a * np.sqrt(3.0 * (1.0 + 2.0 * np.cos(al)))
+
+
+def effective_cell(bt: BravaisType, params, r_hex=False):
+    """
+    Komórka faktycznie rysowana: (M, centrowanie, parametry komórki).
+    Dla hR z r_hex=True — komórka heksagonalna z centrowaniem R_hex.
+    """
+    if bt.key == "hR" and r_hex:
+        a_h, c_h = rhombo_to_hex(params[0], params[3])
+        cp = (a_h, a_h, c_h, 90.0, 90.0, 120.0)
+        return cell_matrix(*cp), "R_hex", cp
+    return cell_matrix(*params), bt.centering, tuple(params)

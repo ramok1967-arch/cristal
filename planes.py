@@ -219,3 +219,95 @@ def intersection_segment_frac(h1, m1, h2, m2, n, tol=1e-9):
 def fmt_uvw(uvw):
     s = [f"{abs(v)}̄" if v < 0 else str(v) for v in uvw]
     return "[" + " ".join(s) + "]"
+
+
+# ----------------------------------------------------------------------
+# wygaszenia systematyczne wynikające z centrowania sieci
+
+EXT_RULE = {
+    "P": "brak warunków",
+    "R": "brak warunków (komórka prymitywna)",
+    "C": "h + k = 2n",
+    "I": "h + k + l = 2n",
+    "F": "h, k, l jednakowej parzystości",
+    "R_hex": "−h + k + l = 3n",
+}
+
+
+def is_allowed(centering, hkl) -> bool:
+    """Czy refleks hkl jest dozwolony przez centrowanie sieci."""
+    h, k, l = (int(x) for x in hkl)
+    if centering == "C":
+        return (h + k) % 2 == 0
+    if centering == "I":
+        return (h + k + l) % 2 == 0
+    if centering == "F":
+        return h % 2 == k % 2 == l % 2
+    if centering == "R_hex":
+        return (-h + k + l) % 3 == 0
+    return True
+
+
+def lattice_plane_multiple(centering, hkl, nmax=6) -> int:
+    """
+    Najmniejsze n, dla którego n·(hkl) jest dozwolone.
+    Rodzina n·(hkl) to faktyczne płaszczyzny sieciowe (zawierające wszystkie węzły),
+    o odstępie d_hkl / n. Dla refleksu dozwolonego n = 1.
+    """
+    for n in range(1, nmax + 1):
+        if is_allowed(centering, [n * x for x in hkl]):
+            return n
+    return 1
+
+
+def fmt_m(m) -> str:
+    """Numer płaszczyzny: całkowity albo ułamek (np. 1/2)."""
+    from fractions import Fraction
+    f = Fraction(m).limit_denominator(12)
+    return str(f.numerator) if f.denominator == 1 else f"{f.numerator}/{f.denominator}"
+
+
+# ----------------------------------------------------------------------
+# notacja Millera-Bravais (układ heksagonalny)
+
+def _bar(v):
+    return f"{abs(v)}̄" if v < 0 else str(v)
+
+
+def hkil(hkl):
+    h, k, l = hkl
+    return (h, k, -(h + k), l)
+
+
+def fmt_hkil(hkl):
+    return "(" + " ".join(_bar(v) for v in hkil(hkl)) + ")"
+
+
+def uvw_to_UVTW(uvw):
+    """[uvw] (3 wskaźniki) -> [UVTW]: U=(2u−v)/3, V=(2v−u)/3, T=−(u+v)/3, W=w;
+    wynik sprowadzony do najmniejszych liczb całkowitych."""
+    u, v, w = (int(x) for x in uvw)
+    return reduce_int([2 * u - v, 2 * v - u, -(u + v), 3 * w])
+
+
+def fmt_UVTW(uvw):
+    return "[" + " ".join(_bar(v) for v in uvw_to_UVTW(uvw)) + "]"
+
+
+# ----------------------------------------------------------------------
+# sieć R: przeliczanie wskaźników między ustawieniami (obverse)
+
+P_R2H = np.array([[1, -1, 0], [0, 1, -1], [1, 1, 1]])      # h_H = P · h_R
+
+
+def hkl_R_to_H(hkl):
+    return tuple(int(x) for x in P_R2H @ np.asarray(hkl, int))
+
+
+def hkl_H_to_R(hkl):
+    """h_R = P⁻¹ · h_H; gdy wynik ułamkowy (refleks wygaszony w R_hex),
+    zwraca najmniejszą całkowitą wielokrotność (×3) — ta sama orientacja płaszczyzny."""
+    v = np.linalg.solve(P_R2H.astype(float), np.asarray(hkl, float))
+    if not np.allclose(v, np.round(v), atol=1e-9):
+        v = v * 3
+    return tuple(int(x) for x in np.round(v))

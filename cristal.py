@@ -1,5 +1,5 @@
 """
-cristal.py — przeglądarka 14 sieci Bravais z płaszczyznami (hkl) (etapy 1–4, 3 płaszczyzny).
+cristal.py — przeglądarka 14 sieci Bravais z płaszczyznami (hkl) (etapy 1–5).
 
 Uruchomienie:
     python cristal.py
@@ -47,12 +47,23 @@ class PlaneControl(QtWidgets.QGroupBox):
         self.setStyleSheet(f"QGroupBox::title{{color:{color}; font-weight:bold;}}")
         gl = QtWidgets.QGridLayout(self)
 
-        gl.addWidget(QtWidgets.QLabel("h k l"), 0, 0)
+        self.lb_hkl = QtWidgets.QLabel("h k l")
+        gl.addWidget(self.lb_hkl, 0, 0)
         self.sp_hkl = []
         for i, v in enumerate(hkl):
-            s = QtWidgets.QSpinBox(); s.setRange(-9, 9); s.setValue(v)
+            s = QtWidgets.QSpinBox(); s.setRange(-12, 12); s.setValue(v)
             s.valueChanged.connect(self._hkl_changed)
-            self.sp_hkl.append(s); gl.addWidget(s, 0, 1 + i)
+            self.sp_hkl.append(s)
+        # i = −(h+k) — tylko do odczytu, widoczne w układzie heksagonalnym (hkil)
+        self.sp_i = QtWidgets.QSpinBox(); self.sp_i.setRange(-24, 24)
+        self.sp_i.setReadOnly(True)
+        self.sp_i.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.sp_i.setStyleSheet("QSpinBox{background:#eeeeee;}")
+        self.sp_i.setToolTip("i = −(h + k)  (notacja Millera-Bravais)")
+        for col, w in zip((1, 2, 3, 4), (self.sp_hkl[0], self.sp_hkl[1], self.sp_i, self.sp_hkl[2])):
+            gl.addWidget(w, 0, col)
+        self.sp_i.setVisible(False)
+        self._hex = False
 
         self.rb_one = QtWidgets.QRadioButton("jedna, nr m =")
         self.rb_all = QtWidgets.QRadioButton("cała rodzina")
@@ -66,14 +77,14 @@ class PlaneControl(QtWidgets.QGroupBox):
         self.rb_one.setToolTip(tip); self.sp_m.setToolTip(tip)
         self._auto_m = True       # dobierz m automatycznie przy następnym rysowaniu
         gl.addWidget(self.rb_one, 1, 0, 1, 2); gl.addWidget(self.sp_m, 1, 2)
-        gl.addWidget(self.rb_all, 1, 3)
+        gl.addWidget(self.rb_all, 1, 3, 1, 2)
 
         hl = QtWidgets.QHBoxLayout()
         hl.addWidget(QtWidgets.QLabel("krycie"))
         self.sl_op = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.sl_op.setRange(10, 100); self.sl_op.setValue(45)
         hl.addWidget(self.sl_op)
-        gl.addLayout(hl, 2, 0, 1, 4)
+        gl.addLayout(hl, 2, 0, 1, 5)
 
         self.toggled.connect(lambda _: self.changed.emit())
         self.rb_one.toggled.connect(lambda _: self.changed.emit())
@@ -82,7 +93,26 @@ class PlaneControl(QtWidgets.QGroupBox):
 
     def _hkl_changed(self, *_):
         self._auto_m = True       # nowe hkl -> dobierz m tak, żeby płaszczyzna była widoczna
+        self._update_i()
         self.changed.emit()
+
+    def _update_i(self):
+        h, k, _ = self.hkl
+        self.sp_i.setValue(-(h + k))
+
+    def set_hex(self, on):
+        """Włącza/wyłącza notację (hkil)."""
+        self._hex = bool(on)
+        self.sp_i.setVisible(self._hex)
+        self.lb_hkl.setText("h k i l" if self._hex else "h k l")
+        self._update_i()
+
+    def set_hkl(self, hkl):
+        """Ustawia hkl bez wielokrotnego przerysowania (jeden sygnał na końcu)."""
+        for s, v in zip(self.sp_hkl, hkl):
+            s.blockSignals(True); s.setValue(int(v)); s.blockSignals(False)
+        self._auto_m = True
+        self._update_i()
 
     @property
     def hkl(self):
@@ -92,14 +122,22 @@ class PlaneControl(QtWidgets.QGroupBox):
     def active(self):
         return self.isChecked() and any(self.hkl)
 
-    def ms(self, n):
-        """Numery m płaszczyzn do narysowania (tylko przecinające blok)."""
+    def ms(self, n, mult=1):
+        """
+        Numery m płaszczyzn do narysowania (tylko przecinające blok).
+        mult > 1 (tryb rodziny, refleks wygaszony): dochodzą płaszczyzny pośrednie
+        m = k/mult — razem tworzą faktyczną rodzinę płaszczyzn sieciowych mult·(hkl).
+        """
+        if self.rb_all.isChecked():
+            r = PL.valid_m_range([mult * x for x in self.hkl], n)
+            if r is None:
+                return []
+            lo, hi = r
+            return [k / mult if mult > 1 else k for k in range(lo, hi + 1)]
         r = PL.valid_m_range(self.hkl, n)
         if r is None:
             return []
         lo, hi = r
-        if self.rb_all.isChecked():
-            return list(range(lo, hi + 1))
         return [self.sp_m.value()] if lo <= self.sp_m.value() <= hi else []
 
     def update_m(self, n):
@@ -150,6 +188,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cb_lattice.addItem(bt.label, bt.key)
         self.cb_lattice.setCurrentIndex(12)   # cI na start
         gl.addWidget(self.cb_lattice)
+        self.chk_rhex = QtWidgets.QCheckBox("hR: ustawienie heksagonalne (obverse)")
+        self.chk_rhex.setToolTip("Komórka heksagonalna a_H = 2a·sin(α/2), c_H = a·√(3(1+2cos α)),\n"
+                                 "węzły w (0,0,0), (⅔,⅓,⅓), (⅓,⅔,⅔).\n"
+                                 "Przy przełączeniu wskaźniki płaszczyzn są przeliczane.")
+        gl.addWidget(self.chk_rhex)
         pl.addWidget(g)
 
         # --- parametry komórki
@@ -211,6 +254,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_zone = QtWidgets.QCheckBox("Linie przecięcia płaszczyzn (osie pasa)")
         self.chk_zone.setChecked(True)
         pl.addWidget(self.chk_zone)
+        self.chk_inter = QtWidgets.QCheckBox("Płaszczyzny pośrednie dla refleksów\nwygaszonych (tryb „cała rodzina”)")
+        self.chk_inter.setToolTip("W sieciach centrowanych rodzina (hkl) z całkowitym m może omijać węzły\n"
+                                  "(np. (100) w cF). Faktyczne płaszczyzny sieciowe to n·(hkl) — pośrednie\n"
+                                  "płaszczyzny m = k/n rysowane są jaśniej.")
+        self.chk_inter.setChecked(True)
+        pl.addWidget(self.chk_inter)
 
         # --- widok
         g = QtWidgets.QGroupBox("Widok")
@@ -244,8 +293,10 @@ class MainWindow(QtWidgets.QMainWindow):
         for s in self.sp_n:
             s.valueChanged.connect(lambda _: self.redraw(reset_camera=True))
         self.bt_vzone.clicked.connect(self.view_along_zone)
-        for w in (self.chk_grid, self.chk_axes, self.chk_color, self.chk_onplane, self.chk_zone):
+        for w in (self.chk_grid, self.chk_axes, self.chk_color, self.chk_onplane, self.chk_zone,
+                  self.chk_inter):
             w.toggled.connect(lambda _: self.redraw())
+        self.chk_rhex.toggled.connect(self.on_rhex_toggled)
         self.chk_ortho.toggled.connect(self.on_ortho)
         self.sl_size.valueChanged.connect(lambda _: self.redraw())
         self.bt_default.clicked.connect(self.load_defaults)
@@ -260,6 +311,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zones = []          # [(etykieta, uvw)]
         self._point3 = None
         self._labels = []         # aktory etykiet a, b, c
+        self.cent = "P"
         self.on_lattice_changed()
 
     # ------------------------------------------------------------------
@@ -280,11 +332,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_params(self.bt.default)
         self.redraw(reset_camera=True)
 
+    @property
+    def r_hex(self):
+        """Czy sieć hR jest pokazywana w ustawieniu heksagonalnym."""
+        return self.bt.key == "hR" and self.chk_rhex.isChecked()
+
+    @property
+    def is_hex(self):
+        """Czy obowiązuje notacja (hkil) — układ heksagonalny lub hR w ustawieniu H."""
+        return self.bt.system == "heksagonalny" or self.r_hex
+
+    def fhkl(self, hkl):
+        return PL.fmt_hkil(hkl) if self.is_hex else PL.fmt_hkl(hkl)
+
+    def fuvw(self, uvw):
+        return f"{PL.fmt_UVTW(uvw)} = {PL.fmt_uvw(uvw)}" if self.is_hex else PL.fmt_uvw(uvw)
+
     def on_lattice_changed(self, *_):
         bt = self.bt
         for name, s in self.sp.items():
             s.setEnabled(name in bt.free)
+        self.chk_rhex.setEnabled(bt.key == "hR")
         self.set_params(bt.default)
+        self.redraw(reset_camera=True)
+        self.view_iso()
+
+    def on_rhex_toggled(self, on):
+        """Przełączenie R ↔ H: przelicz wskaźniki płaszczyzn, żeby pokazywały te same płaszczyzny."""
+        if self.bt.key != "hR":
+            return
+        conv = PL.hkl_R_to_H if on else PL.hkl_H_to_R
+        for pc in self.planes:
+            if any(pc.hkl):
+                pc.set_hkl(conv(pc.hkl))
         self.redraw(reset_camera=True)
         self.view_iso()
 
@@ -311,27 +391,31 @@ class MainWindow(QtWidgets.QMainWindow):
         bt = self.bt
         params = L.constrain(bt, {k: s.value() for k, s in self.sp.items()})
         try:
-            M = L.cell_matrix(*params)
+            M, cent, cparams = L.effective_cell(bt, params, self.chk_rhex.isChecked())
         except ValueError as e:
             self.info.setText(f"<b style='color:#c00'>{e}</b>")
             return
         self.M = M
+        self.cent = cent
+        for pc in self.planes:
+            pc.set_hex(self.is_hex)
         n = self.n_block()
         p = self.plotter
         p.clear_actors()
         self._labels = []
 
         # węzły
-        frac, kind = L.lattice_nodes(bt.centering, n)
+        frac, kind = L.lattice_nodes(cent, n)
         xyz = frac @ M
-        r = 0.01 * self.sl_size.value() * min(params[:3])
+        r = 0.01 * self.sl_size.value() * min(cparams[:3])
 
         # płaszczyzny aktywne: (kontrolka, hkl, lista m)
         active = []
         for pc in self.planes:
             pc.update_m(n)
             if pc.active:
-                active.append((pc, pc.hkl, pc.ms(n)))
+                mult = PL.lattice_plane_multiple(cent, pc.hkl) if self.chk_inter.isChecked() else 1
+                active.append((pc, pc.hkl, pc.ms(n, mult)))
 
         onplane = np.zeros(len(frac), bool)
         if self.chk_onplane.isChecked():
@@ -354,21 +438,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # wielokąty płaszczyzn
         for j, (pc, hkl, ms) in enumerate(active):
-            polys = [PL.plane_polygon(M, hkl, m, n) for m in ms]
-            polys = [q for q in polys if q is not None]
-            if not polys:
-                continue
-            pts, faces, off = [], [], 0
-            for q in polys:
-                pts.append(q)
-                faces += [len(q)] + list(range(off, off + len(q)))
-                off += len(q)
-            mesh = pv.PolyData(np.vstack(pts), faces=np.array(faces))
-            p.add_mesh(mesh, color=pc.color, opacity=pc.sl_op.value() / 100.0,
-                       show_edges=False, lighting=False, name=f"plane{j}")
-            p.add_mesh(mesh.extract_feature_edges(boundary_edges=True, feature_edges=False,
-                                                  manifold_edges=False, non_manifold_edges=False),
-                       color=pc.color, line_width=2.5, name=f"plane{j}_edge")
+            # płaszczyzny o całkowitym m oraz pośrednie (m ułamkowe) — te drugie jaśniej
+            for kind_m, sel, op_f, lw in (("", [m for m in ms if float(m).is_integer()], 1.0, 2.5),
+                                          ("_int", [m for m in ms if not float(m).is_integer()], 0.45, 1.2)):
+                polys = [PL.plane_polygon(M, hkl, m, n) for m in sel]
+                polys = [q for q in polys if q is not None]
+                if not polys:
+                    continue
+                pts, faces, off = [], [], 0
+                for q in polys:
+                    pts.append(q)
+                    faces += [len(q)] + list(range(off, off + len(q)))
+                    off += len(q)
+                mesh = pv.PolyData(np.vstack(pts), faces=np.array(faces))
+                p.add_mesh(mesh, color=pc.color, opacity=op_f * pc.sl_op.value() / 100.0,
+                           show_edges=False, lighting=False, name=f"plane{j}{kind_m}")
+                p.add_mesh(mesh.extract_feature_edges(boundary_edges=True, feature_edges=False,
+                                                      manifold_edges=False, non_manifold_edges=False),
+                           color=pc.color, line_width=lw, name=f"plane{j}{kind_m}_edge")
 
         # osie pasa: linie przecięcia każdej pary płaszczyzn
         idx_active = [k for k, pc in enumerate(self.planes) if pc.active]
@@ -381,7 +468,8 @@ class MainWindow(QtWidgets.QMainWindow):
             uvw = PL.zone_axis(h1, h2)
             if not any(uvw):
                 continue
-            zones.append((f"{i + 1}∧{j + 1}  {PL.fmt_uvw(uvw)}", uvw))
+            zones.append((f"{i + 1}∧{j + 1}  "
+                          + (PL.fmt_UVTW(uvw) if self.is_hex else PL.fmt_uvw(uvw)), uvw))
             if self.chk_zone.isChecked():
                 segs = []
                 for m1 in ms1:
@@ -404,7 +492,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 f = np.linalg.solve(H, np.array([ms[0] for _, _, ms in active], float))
                 self._point3 = f
                 if np.all(f >= -1e-7) and np.all(f <= np.array(n) + 1e-7):
-                    p.add_mesh(pv.Sphere(radius=max(1.6 * r, 0.06 * min(params[:3])),
+                    p.add_mesh(pv.Sphere(radius=max(1.6 * r, 0.06 * min(cparams[:3])),
                                          center=f @ M),
                                color=COL_POINT, name="point3")
 
@@ -450,32 +538,51 @@ class MainWindow(QtWidgets.QMainWindow):
         if reset_camera:
             p.reset_camera()
         p.render()
-        self.update_info(bt, params, M, len(frac), active, frac)
+        self.update_info(bt, params, M, len(frac), active, frac, cent, cparams)
 
-    def update_info(self, bt, params, M, nnodes, active=(), frac=None):
-        a, b, c, al, be, ga = params
+    def update_info(self, bt, params, M, nnodes, active=(), frac=None, cent=None, cparams=None):
+        cent = cent or bt.centering
+        cparams = cparams or params
+        a, b, c, al, be, ga = cparams
         V = L.cell_volume(M)
-        z = L.nodes_per_cell(bt.centering)
+        z = L.nodes_per_cell(cent)
         txt = (
-            f"<b>{bt.system}</b>, {L.CENTERING_NAME[bt.centering]}<br>"
+            f"<b>{bt.system}</b>, {L.CENTERING_NAME[cent]}<br>"
             f"symbol: <b>{bt.key}</b><br>"
-            f"a={a:.3f}  b={b:.3f}  c={c:.3f} Å<br>"
-            f"α={al:.2f}°  β={be:.2f}°  γ={ga:.2f}°<br>"
+        )
+        if cent == "R_hex":
+            txt += (f"komórka R: a<sub>R</sub>={params[0]:.3f} Å, α<sub>R</sub>={params[3]:.2f}°<br>"
+                    f"komórka H: a<sub>H</sub>={a:.3f}  c<sub>H</sub>={c:.3f} Å, γ=120°<br>")
+        else:
+            txt += (f"a={a:.3f}  b={b:.3f}  c={c:.3f} Å<br>"
+                    f"α={al:.2f}°  β={be:.2f}°  γ={ga:.2f}°<br>")
+        txt += (
             f"V = {V:.3f} Å³<br>"
             f"węzłów / komórkę: {z}  (V<sub>prym</sub> = {V / z:.3f} Å³)<br>"
-            f"węzłów w bloku: {nnodes}"
+            f"węzłów w bloku: {nnodes}<br>"
+            f"wygaszenia (centrowanie): {PL.EXT_RULE[cent]}"
         )
         for pc, hkl, ms in active:
             d = PL.d_spacing(M, hkl)
             nrm = PL.normal_cart(M, hkl)
             non = int(PL.on_plane_mask(frac, hkl, ms).sum()) if frac is not None else 0
+            allowed = PL.is_allowed(cent, hkl)
+            nmul = PL.lattice_plane_multiple(cent, hkl)
+            n_int = sum(1 for m in ms if float(m).is_integer())
+            n_mid = len(ms) - n_int
             txt += (
-                f"<hr><b style='color:{pc.color}'>{PL.fmt_hkl(hkl)}</b><br>"
-                f"d<sub>hkl</sub> = {d:.4f} Å<br>"
+                f"<hr><b style='color:{pc.color}'>{self.fhkl(hkl)}</b>"
+                + (f"  = {PL.fmt_hkl(hkl)}" if self.is_hex else "") + "<br>"
+                + (f"refleks: <b style='color:#1a7f1a'>dozwolony</b><br>" if allowed else
+                   f"refleks: <b style='color:#c00'>wygaszony</b> ({PL.EXT_RULE[cent]})<br>"
+                   f"płaszczyzny sieciowe: {self.fhkl([nmul * x for x in hkl])}, "
+                   f"d = d<sub>hkl</sub>/{nmul} = {d / nmul:.4f} Å<br>")
+                + f"d<sub>hkl</sub> = {d:.4f} Å<br>"
                 f"odcinki (m=1): {PL.intercepts_text(hkl)}<br>"
                 f"normalna (kart.): [{nrm[0]:.3f}, {nrm[1]:.3f}, {nrm[2]:.3f}]<br>"
-                f"płaszczyzn w bloku: {len(ms)}"
-                f"{'  (m = ' + ', '.join(map(str, ms)) + ')' if 0 < len(ms) <= 8 else ''}<br>"
+                f"płaszczyzn w bloku: {n_int}"
+                + (f" + {n_mid} pośrednich" if n_mid else "")
+                + (f"  (m = {', '.join(PL.fmt_m(m) for m in ms)})" if 0 < len(ms) <= 8 else "") + "<br>"
                 + (f"m = {ms[0]}: położenie m·d = {ms[0] * d:+.4f} Å<br>" if len(ms) == 1 else "")
                 + f"węzłów na nich: {non}"
             )
@@ -486,13 +593,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             h1, h2 = by_k[i], by_k[j]
             phi = PL.angle_planes(M, h1, h2)
-            txt += (f"<hr><b>{i + 1}∧{j + 1}: {PL.fmt_hkl(h1)} ∧ {PL.fmt_hkl(h2)}</b><br>"
+            txt += (f"<hr><b>{i + 1}∧{j + 1}: {self.fhkl(h1)} ∧ {self.fhkl(h2)}</b><br>"
                     f"kąt φ = <b>{phi:.3f}°</b>  (180°−φ = {180 - phi:.3f}°)<br>")
             uvw = PL.zone_axis(h1, h2)
             if any(uvw):
                 t = np.asarray(uvw, float) @ M
                 t /= np.linalg.norm(t)
-                txt += (f"oś pasa: <b style='color:{col}'>{PL.fmt_uvw(uvw)}</b><br>"
+                txt += (f"oś pasa: <b style='color:{col}'>{self.fuvw(uvw)}</b><br>"
                         f"|{PL.fmt_uvw(uvw)}| = {PL.dir_length(M, uvw):.4f} Å<br>"
                         f"kierunek (kart.): [{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}]")
             else:
@@ -504,7 +611,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 # det = 0 -> normalne współpłaszczyznowe -> wspólny pas (tautozonalne)
                 axes = [PL.zone_axis(H[a], H[b]) for a, b in ((0, 1), (0, 2), (1, 2))]
                 ax = next((u for u in axes if any(u)), None)
-                txt += ("leżą w jednym pasie" + (f" — oś {PL.fmt_uvw(ax)}" if ax else "")
+                txt += ("leżą w jednym pasie" + (f" — oś {self.fuvw(ax)}" if ax else "")
                         + "<br>(det = 0, normalne współpłaszczyznowe)")
             else:
                 txt += f"nie leżą w jednym pasie (det = {round(np.linalg.det(H))})<br>"
