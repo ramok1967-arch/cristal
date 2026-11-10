@@ -9,6 +9,7 @@ Wymaga: numpy, PyQt5, pyvista, pyvistaqt
 import sys
 import numpy as np
 import pyvista as pv
+import vtk
 from pyvistaqt import QtInteractor
 from PyQt5 import QtCore, QtWidgets
 
@@ -27,6 +28,8 @@ COL_CENTER = "#e0553a"     # węzły centrujące
 COL_CELL = "#111111"       # komórka 000
 COL_GRID = "#9a9a9a"       # pozostałe komórki bloku
 COL_AXES = {"a": "#d62728", "b": "#2ca02c", "c": "#1f77b4"}
+
+LABEL_FONT = 20            # rozmiar etykiet a, b, c [px]
 
 PARAM_LABEL = {"a": "a [Å]", "b": "b [Å]", "c": "c [Å]",
                "alpha": "α [°]", "beta": "β [°]", "gamma": "γ [°]"}
@@ -255,6 +258,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._busy = False
         self.M = np.eye(3)
         self._zones = []          # [(etykieta, uvw)]
+        self._point3 = None
+        self._labels = []         # aktory etykiet a, b, c
         self.on_lattice_changed()
 
     # ------------------------------------------------------------------
@@ -314,6 +319,7 @@ class MainWindow(QtWidgets.QMainWindow):
         n = self.n_block()
         p = self.plotter
         p.clear_actors()
+        self._labels = []
 
         # węzły
         frac, kind = L.lattice_nodes(bt.centering, n)
@@ -429,9 +435,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 arr = pv.Arrow(start=(0, 0, 0), direction=vec, scale=ln,
                                tip_length=0.18, tip_radius=0.05, shaft_radius=0.018)
                 p.add_mesh(arr, color=COL_AXES[lab], name=f"ax_{lab}")
-            p.add_point_labels(M * 1.12, list("abc"), font_size=20, bold=True,
-                               text_color="black", shape=None, show_points=False,
-                               always_visible=True, name="ax_labels")
+            # etykiety jako billboardy 3D: w odróżnieniu od napisów 2D (add_point_labels)
+            # nie znikają przy zapisie PNG w powiększonej rozdzielczości
+            for pos, lab in zip(M * 1.12, "abc"):
+                ta = vtk.vtkBillboardTextActor3D()
+                ta.SetInput(lab)
+                ta.SetPosition(*pos)
+                tp = ta.GetTextProperty()
+                tp.SetFontSize(LABEL_FONT); tp.SetBold(True); tp.SetColor(0, 0, 0)
+                tp.SetJustificationToCentered(); tp.SetVerticalJustificationToCentered()
+                p.add_actor(ta, name=f"ax_label_{lab}")
+                self._labels.append(ta)
 
         if reset_camera:
             p.reset_camera()
@@ -545,8 +559,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def save_png(self):
         fn, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Zapisz obraz", f"{self.bt.key}.png", "PNG (*.png)")
-        if fn:
-            self.plotter.screenshot(fn, transparent_background=False, scale=2)
+        if not fn:
+            return
+        scale = 2
+        # billboardy mają rozmiar w pikselach -> przy powiększonym zapisie zwiększ czcionkę
+        for ta in self._labels:
+            ta.GetTextProperty().SetFontSize(LABEL_FONT * scale)
+        try:
+            self.plotter.screenshot(fn, transparent_background=False, scale=scale)
+        finally:
+            for ta in self._labels:
+                ta.GetTextProperty().SetFontSize(LABEL_FONT)
+            self.plotter.render()
 
     def closeEvent(self, e):
         self.plotter.close()
