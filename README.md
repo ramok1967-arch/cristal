@@ -12,7 +12,8 @@
 
 ## Pliki
 - lattice.py  — geometria (macierz komórki, centrowania, węzły bloku), bez GUI
-- planes.py   — płaszczyzny (hkl): d_hkl, normalna, przycięcie do bloku
+- planes.py   — płaszczyzny (hkl): d_hkl, normalna, przycięcie do bloku, oś pasa, kąty,
+                wygaszenia, notacja (hkil), transformacja R ↔ H
 - cristal.py  — okno PyQt5 + PyVista
 
 ## Obsługa
@@ -20,17 +21,19 @@
 - parametry niezależne dla danego układu są aktywne, pozostałe wymusza symetria
 - jednoskośny: oś unikalna b; trygonalny R: komórka romboedryczna albo heksagonalna (przełącznik)
 - "wzdłuż a/b/c" włącza rzut równoległy
+- rozmiar węzłów domyślnie minimalny (suwak w "Wygląd")
 
 ## Plan
 1. [x] sieci + obrót + blok n1×n2×n3
 2. [x] płaszczyzna (hkl) przycięta do bloku
 3. [x] rodzina płaszczyzn, d_hkl
-4. [x] dwie płaszczyzny: oś pasa [uvw], kąt, widok wzdłuż osi pasa
+4. [x] dwie/trzy płaszczyzny: oś pasa [uvw], kąt, widok wzdłuż osi pasa
 5. [x] wygaszenia, notacja hkil (Miller-Bravais), sieć R w ustawieniu heksagonalnym
 
 ## Płaszczyzny
 - płaszczyzna (hkl) nr m: h·x + k·y + l·z = m (współrzędne ułamkowe);
-  m = 1 odcina a/h, b/k, c/l; m = 0 przechodzi przez początek
+  m = 1 odcina a/h, b/k, c/l; m = 0 przechodzi przez początek;
+  położenie płaszczyzny względem początku = m·d_hkl
 - spinbox m obejmuje tylko płaszczyzny tnące blok (bez dotykających narożnika/krawędzi)
 - po zmianie hkl m dobiera się samo: m = 1, jeśli tnie blok, inaczej płaszczyzna
   najbliższa środka bloku
@@ -46,7 +49,8 @@
   w trybie rodzin — wszystkie przecięcia
 - trzy płaszczyzny: det[h1;h2;h3] = 0 -> leżą w jednym pasie (tautozonalne);
   w przeciwnym razie czarna kulka = punkt wspólny (tryb „jedna”)
-- lista + "wzdłuż osi pasa" ustawia widok wzdłuż [uvw] w rzucie równoległym (jak oś strefy w TEM)
+- lista + "wzdłuż osi pasa" ustawia widok wzdłuż wybranej [uvw] w rzucie
+  równoległym (jak oś strefy w TEM)
 
 ## Wygaszenia (centrowanie sieci)
 | centrowanie | warunek refleksu hkl |
