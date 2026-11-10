@@ -60,8 +60,12 @@ class PlaneControl(QtWidgets.QGroupBox):
         self.sp_i.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.sp_i.setStyleSheet("QSpinBox{background:#eeeeee;}")
         self.sp_i.setToolTip("i = −(h + k)  (notacja Millera-Bravais)")
-        for col, w in zip((1, 2, 3, 4), (self.sp_hkl[0], self.sp_hkl[1], self.sp_i, self.sp_hkl[2])):
-            gl.addWidget(w, 0, col)
+        # osobny wiersz: ukryte pole i nie zostawia pustej kolumny
+        hb = QtWidgets.QHBoxLayout()
+        hb.setSpacing(4)
+        for w in (self.sp_hkl[0], self.sp_hkl[1], self.sp_i, self.sp_hkl[2]):
+            hb.addWidget(w)
+        gl.addLayout(hb, 0, 1, 1, 4)
         self.sp_i.setVisible(False)
         self._hex = False
 
